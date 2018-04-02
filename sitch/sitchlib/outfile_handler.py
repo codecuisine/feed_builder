@@ -14,7 +14,7 @@ class OutfileHandler(object):
     def write_fcc_record(self, data):
         dir_name = self.base_path
         state = data["LOC_STATE"]
-        file_name = "%s.csv" % state
+        file_name = "CA-%s.csv" % state
         file_path = os.path.join(dir_name, file_name)
         if file_path in self.feed_files:
             self.append_feed_file(file_path, self.fcc_columns, data)

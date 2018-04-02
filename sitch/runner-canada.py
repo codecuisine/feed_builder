@@ -5,6 +5,9 @@ import os
 import sitchlib
 import shutil
 from dateutil.parser import parse as dt_parse
+from LatLon.lat_lon import LatLon
+
+import pdb
 
 """ Outputs files like state.csv.gz.  These contain CSV data from the
 FCC license database.  Use for determining GPS distance from tower.  Also
@@ -32,6 +35,8 @@ fcc_fields = ["LICENSE_ID", "SOURCE_SYSTEM", "CALLSIGN", "FACILITY_ID", "FRN",
               "FREQ_CLASS_STATION_DESC", "POWER_ERP", "POWER_OUTPUT",
               "FREQUENCY_ASSIGNED", "FREQUENCY_UPPER_BAND", "UNIT_OF_MEASURE",
               "GROUND_ELEVATION", "ARFCN"]
+
+ised_fields = ["NEW_ACCOUNT","NEW_LICNO","OLD_ACCOUNT","OLD_LICNO","LICENSEE","SERVICE","TRANSMIT_FREQ","RECEIVE_FREQ","TRANSMIT_LOWER","TRANSMIT_UPPER","TRANSMIT_BW","LOCATION","PROV","LATITUDE","LONGITUDE","SITE_ELEV","STUCT_HT","TX_MFR","TX_MODEL","TX_PWR","TX_PWR_TYPE","BW_EMISSION","TX_ANT_MFR","TX_ANT_MODEL","TX_ANT_HT","TX_ANT_AZIM","TX_ANT_ELEV_ANGLE","TX_ANT_GAIN","TX_ANT_DIRECTIONAL","TX_LINE_LOSS","ZONE_ENHANCER","LAST_MOD_DATE","LAST_UPLOAD_DATE"]
 
 ocid_fields = ["radio", "mcc", "net", "area", "cell", "unit", "lon",
                "lat", "range", "samples", "changeable", "created",
@@ -82,53 +87,83 @@ def iso8601_to_epoch(iso_time):
                 datetime.datetime(1970, 1, 1)).total_seconds())
 
 
+def convert_dec_latlon_to_deg(dec_latitude, dec_longtitude):
+    latlon_position = LatLon(dec_latitude, dec_longtitude) 
+    latlon_strs = latlon_position.to_string('d% %m% %S% %H')
+    lat_deg = latlon_strs[0].split()
+    long_deg = latlon_strs[1].split()
+
+    return [lat_deg, long_deg]
+
+def populate_fcc_from_ised(fcc_row, ised_row):
+    fcc_lat_log = convert_dec_latlon_to_deg(float(ised_row["LATITUDE"]), float(ised_row["LONGITUDE"]))
+    fcc_row["COMMON_NAME"] = ised_row["LICENSEE"]
+    fcc_row["LOC_STATE"]  = ised_row["PROV"]
+    
+    fcc_row["LOC_LAT_DEG"] = fcc_lat_log[0][0]
+    fcc_row["LOC_LAT_MIN"] = fcc_lat_log[0][1]
+    fcc_row["LOC_LAT_SEC"] = fcc_lat_log[0][2]
+    fcc_row["LOC_LAT_DIR"] = fcc_lat_log[0][3]
+    fcc_row["LOC_LONG_DEG"] = fcc_lat_log[1][0]
+    fcc_row["LOC_LONG_MIN"] = fcc_lat_log[1][1]
+    fcc_row["LOC_LONG_SEC"] = fcc_lat_log[1][2]
+    fcc_row["LOC_LONG_DIR"] = fcc_lat_log[1][3]
+
+    fcc_row["LAST_ACTION_DATE"] = datetime.datetime.today().strftime('%m/%d/%Y %H:%M:%S')#06/08/2017 15:27:17
+                                                            
 def main():
-    import pdb
-    pdb.set_trace()
     sitchlib.OutfileHandler.ensure_path_exists(feed_directory)
     arfcn_comparator = sitchlib.ArfcnComparator()
     config = sitchlib.ConfigHelper()
     fileout = sitchlib.OutfileHandler(config.base_path,
                                       fcc_fields, ocid_fields)
-    twilio_c = sitchlib.TwilioCarriers(config.twilio_sid,
-                                       config.twilio_token)
-    mcc_mnc_carriers = twilio_c.get_providers_for_country(config.iso_country)
-    carrier_enricher = sitchlib.CarrierEnricher(mcc_mnc_carriers)
+    #twilio_c = sitchlib.TwilioCarriers(config.twilio_sid,
+    #                                   config.twilio_token)
+    #mcc_mnc_carriers = twilio_c.get_providers_for_country(config.iso_country)
+    #carrier_enricher = sitchlib.CarrierEnricher(mcc_mnc_carriers)
     fcc_feed_obj = sitchlib.FccCsv(config.fcc_destination_file)
+    
     newest_ocid_record = 0
     newest_fcc_record = 0
     print "Splitting FCC license file into feed files..."
     for row in fcc_feed_obj:
-        f_min = row["FREQUENCY_ASSIGNED"]
-        f_max = row["FREQUENCY_UPPER_BAND"]
+        f_min = row["TRANSMIT_FREQ"]
+        try:
+            f_max = str(float(f_min) + float(row["TRANSMIT_BW"] and row["TRANSMIT_BW"] or "0" ))
+        except ValueError:
+            pdb.set_trace()
+            print row["TRANSMIT_FREQ"], row["TRANSMIT_BW"]
         arfcns = arfcn_comparator.arfcn_from_downlink_range(f_min, f_max)
         net_row = {}
         for column in fcc_fields:
             try:
-                net_row[column] = row[column]
+                net_row[column] = ""#row[column]
             except KeyError:
                 pass
+        populate_fcc_from_ised(net_row, row)
         for arfcn in arfcns:
             net_row["ARFCN"] = arfcn
             fileout.write_fcc_record(net_row)
-        if iso8601_to_epoch(row["LAST_ACTION_DATE"]) > newest_fcc_record:
-            newest_fcc_record = iso8601_to_epoch(row["LAST_ACTION_DATE"])
+        # if iso8601_to_epoch(row["LAST_ACTION_DATE"]) > newest_fcc_record:
+        #     newest_fcc_record = iso8601_to_epoch(row["LAST_ACTION_DATE"])
+    #pdb.set_trace()
     print "Compressing FCC feed files"
     compress_and_remove_original(fileout.feed_files)
     fileout = None
     fileout = sitchlib.OutfileHandler(config.base_path,
                                       fcc_fields, ocid_fields)
-    ocid_feed_obj = sitchlib.OcidCsv(config.ocid_destination_file)
-    print "Splitting OpenCellID feed into MCC files..."
-    for row in ocid_feed_obj:
-        if row["radio"] != config.target_radio:
-            continue
-        row["carrier"] = carrier_enricher.get_carrier(row["mcc"], row["net"])
-        if int(row["updated"]) > int(newest_ocid_record):
-            newest_ocid_record = int(row["updated"])
-        fileout.write_ocid_record(row)
-    print "Compressing OpenCellID feed files"
-    compress_and_remove_original(fileout.feed_files)
+    # ocid feeds are not needed
+    # ocid_feed_obj = sitchlib.OcidCsv(config.ocid_destination_file)
+    # print "Splitting OpenCellID feed into MCC files..."
+    # for row in ocid_feed_obj:
+    #     if row["radio"] != config.target_radio:
+    #         continue
+    #     row["carrier"] = carrier_enricher.get_carrier(row["mcc"], row["net"])
+    #     if int(row["updated"]) > int(newest_ocid_record):
+    #         newest_ocid_record = int(row["updated"])
+    #     fileout.write_ocid_record(row)
+    # print "Compressing OpenCellID feed files"
+    # compress_and_remove_original(fileout.feed_files)
     print "Moving to drop directory..."
     staged_files = os.listdir(config.base_path)
     for staged_file in staged_files:
@@ -136,9 +171,8 @@ def main():
         full_dst_file_name = os.path.join(feed_directory, staged_file)
         if (os.path.isfile(full_src_file_name)):
             shutil.copy(full_src_file_name, full_dst_file_name)
-    write_statusfile("/opt/README.md", newest_fcc_record, newest_ocid_record)
+    write_statusfile("/opt/feed/README.md", newest_fcc_record, newest_ocid_record)
     print "ALL DONE!!!"
-
 
 if __name__ == "__main__":
     main()
