@@ -92,6 +92,14 @@ def convert_dec_latlon_to_deg(dec_latitude, dec_longtitude):
     latlon_strs = latlon_position.to_string('d% %m% %S% %H')
     lat_deg = latlon_strs[0].split()
     long_deg = latlon_strs[1].split()
+    # if ((latlon_position.to_string('d% %m% %S% %H')[1]).find('e') != -1):
+    # weird bug that put e instead of e- when the sec is very small
+    #     pdb.set_trace()
+    
+
+    # print latlon_strs
+    # print lat_deg
+    # print long_deg
 
     return [lat_deg, long_deg]
 
@@ -102,11 +110,11 @@ def populate_fcc_from_ised(fcc_row, ised_row):
     
     fcc_row["LOC_LAT_DEG"] = fcc_lat_log[0][0]
     fcc_row["LOC_LAT_MIN"] = fcc_lat_log[0][1]
-    fcc_row["LOC_LAT_SEC"] = fcc_lat_log[0][2]
-    fcc_row["LOC_LAT_DIR"] = fcc_lat_log[0][3]
+    fcc_row["LOC_LAT_SEC"] = (fcc_lat_log[0][2].find("e") == -1) and fcc_lat_log[0][2] or "0"
+    fcc_row["LOC_LAT_DIR"] = fcc_lat_log[0][3] 
     fcc_row["LOC_LONG_DEG"] = fcc_lat_log[1][0]
     fcc_row["LOC_LONG_MIN"] = fcc_lat_log[1][1]
-    fcc_row["LOC_LONG_SEC"] = fcc_lat_log[1][2]
+    fcc_row["LOC_LONG_SEC"] = (fcc_lat_log[1][2].find("e") == -1) and fcc_lat_log[1][2] or "0"
     fcc_row["LOC_LONG_DIR"] = fcc_lat_log[1][3]
 
     fcc_row["LAST_ACTION_DATE"] = datetime.datetime.today().strftime('%m/%d/%Y %H:%M:%S')#06/08/2017 15:27:17
